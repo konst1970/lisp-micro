@@ -1,1 +1,412 @@
+\documentclass[11pt,a4paper,oneside]{report}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[margin=25mm]{geometry}
+\usepackage{microtype}
+\usepackage{hyperref}
+\usepackage{booktabs,longtable,array}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{amsmath}
+\hypersetup{colorlinks=true,linkcolor=blue!45!black,urlcolor=blue!50!black,pdftitle={Mini Lisp User and Implementation Manual},pdfauthor={SKED Project Documentation}}
+\definecolor{codebg}{RGB}{247,248,250}
+\definecolor{codeframe}{RGB}{211,218,225}
+\lstdefinestyle{code}{basicstyle=\ttfamily\small,backgroundcolor=\color{codebg},frame=single,rulecolor=\color{codeframe},breaklines=true,columns=fullflexible,keepspaces=true,showstringspaces=false,tabsize=2,upquote=true,xleftmargin=3mm,xrightmargin=3mm,aboveskip=7pt,belowskip=7pt}
+\lstset{style=code}
+\newcommand{\code}[1]{\texttt{#1}}
+\pagestyle{fancy}\fancyhf{}\fancyhead[L]{Mini Lisp / SKED}\fancyhead[R]{Technical Manual v0.1}\fancyfoot[C]{\thepage}\setlength{\headheight}{14pt}
+\title{\textbf{Mini Lisp}\par User Guide, Language Reference, and Implementation Notes\\[1em]\large Python + pyparsing / SKED FACTORIAL-GATE}
+\author{Technical documentation based on the supplied source implementation}
+\date{13 October 2026\quad |\quad Version 0.1}
+\begin{document}\maketitle
+\begin{abstract}
+This manual documents a deliberately small Lisp interpreter written in Python with a \texttt{pyparsing} front end. It covers setup, executing source programs, the exact implemented language subset, API usage, diagnostics, validation, and the implementation design. The implementation notes explicitly distinguish existing behavior from proposed future improvements. This is \emph{not} a Scheme or Common Lisp conformance claim.
+\end{abstract}
+\tableofcontents\clearpage
+\chapter{Purpose and Scope}
+\section{Project goal}
+Mini Lisp is a teaching and engineering prototype that demonstrates the execution path from S-expression source text to a result. Its immediate milestone is the SKED \textbf{FACTORIAL-GATE}: parse a Lisp file, define a recursive factorial function, execute it, and print the answer \texttt{120} for input \texttt{5}.
+\section{What this version does}
+The existing code implements integer literals, symbols, parenthesized expressions, semicolon-to-end-of-line comments, top-level sequences, \texttt{define}, \texttt{lambda}, \texttt{if}, function application, lexical closures, and three primitives \texttt{=}, \texttt{-}, and \texttt{*}. It reads programs from UTF-8 files and returns the value of the last top-level expression.
+\section{What this version is not}
+It does not implement a REPL, ordinary Lisp linked lists, quoted forms, string literals, general-purpose numeric types, macros, \texttt{let}, \texttt{begin}, Boolean literals, user-facing input/output functions, bytecode, tail-call optimization, or a separate garbage collector. The Python interpreter supplies the memory manager. Neither untrusted-code isolation nor resource quotas are provided.
+\section{Repository structure}
+\begin{lstlisting}
+mini_lisp_sked/
+  README.md
+  requirements.txt
+  parser.py
+  runtime.py
+  main.py
+  examples/
+    factorial.lisp
+  tests/
+    test_factorial.py
+\end{lstlisting}
+\begin{longtable}{p{0.25\textwidth}p{0.68\textwidth}}\toprule File & Responsibility\\\midrule\endhead
+\texttt{parser.py} & pyparsing grammar, \texttt{Symbol} node type, and \texttt{parse(source)}.\\
+\texttt{runtime.py} & lexical environments, closure values, special forms, primitive operations, evaluation and program execution.\\
+\texttt{main.py} & command-line file loading and user-visible errors.\\
+\texttt{examples/factorial.lisp} & canonical factorial program.\\
+\texttt{tests/test\_factorial.py} & unit tests used by the current milestone.\\
+\texttt{requirements.txt} & pyparsing version constraint \texttt{>=3.2,<4}.\\\bottomrule
+\end{longtable}
 
+\chapter{Installation and First Execution}
+\section{Requirements}
+Use Python 3 with \texttt{venv} and a version of \texttt{pyparsing} satisfying the project's dependency declaration. Python 3.10 or later is a reasonable development target, but the repository does not currently enforce an exact Python minimum. The examples below use a standard POSIX shell as found on Debian 13.
+\section{Creating the environment}
+Run these commands from the project root.
+\begin{lstlisting}[language=bash]
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+\end{lstlisting}
+The venv isolates project dependencies from the system interpreter. To check the selected interpreter and installed library:
+\begin{lstlisting}[language=bash]
+python --version
+python -m pip show pyparsing
+\end{lstlisting}
+\section{Run the factorial example}
+\begin{lstlisting}[language=bash]
+python main.py examples/factorial.lisp
+\end{lstlisting}
+Expected standard output:
+\begin{lstlisting}
+120
+\end{lstlisting}
+A successful run exits with status code zero. Parsing, evaluation, recursion-limit, and file-reading failures are reported to standard error with a nonzero exit status.
+\section{Run automated tests}
+\begin{lstlisting}[language=bash]
+python -m unittest discover -s tests -v
+\end{lstlisting}
+The repository contains six \texttt{unittest} methods; one includes five separate factorial input cases. A passing result validates the selected cases, not language completeness.
+\section{Run a modified program}
+Copy \texttt{examples/factorial.lisp} to another file, then alter the last expression:
+\begin{lstlisting}[language=bash]
+cp examples/factorial.lisp examples/factorial10.lisp
+\end{lstlisting}
+Change \texttt{(factorial 5)} to \texttt{(factorial 10)} and run:
+\begin{lstlisting}[language=bash]
+python main.py examples/factorial10.lisp
+\end{lstlisting}
+Expected output: \texttt{3628800}. The interpreter does not accept a Lisp expression directly as a command-line argument; its sole positional argument is a filename.
+
+\chapter{Writing Programs in Mini Lisp}
+\section{The factorial program}
+\begin{lstlisting}
+; A comment occupies the rest of this line.
+(define factorial
+  (lambda (n)
+    (if (= n 0)
+        1
+        (* n (factorial (- n 1))))))
+
+(factorial 5)
+\end{lstlisting}
+The first top-level expression binds \texttt{factorial} to a closure; the second calls that closure. The script prints only the result of the last expression.
+\section{Syntax at a glance}
+Programs use prefix notation and parentheses to denote expression structure. For example \texttt{(- 7 2)} computes five and \texttt{(* 2 3 4)} computes 24. Whitespace separates atoms; newlines have no additional statement-ending meaning. A semicolon starts a comment that continues to the end of its line.
+\section{Integer literals}
+Supported numeric literals are signed decimal integers, for example \texttt{0}, \texttt{17}, \texttt{-3}, and \texttt{+12}. Floating-point and hexadecimal tokens are not interpreted as numbers. They may be lexed as symbols and fail at evaluation unless they have bindings.
+\section{Symbols}
+A symbol names a variable, primitive function, or special form. Examples include \texttt{n}, \texttt{factorial}, \texttt{*}, and \texttt{=}. Symbols are case-sensitive. A symbol cannot contain whitespace, \texttt{(}, \texttt{)}, or \texttt{;}. There are no string literals, even though symbols are internally represented by a subclass of Python \texttt{str}.
+\section{Definitions}
+\begin{lstlisting}
+(define answer 42)
+answer
+\end{lstlisting}
+\texttt{define} requires exactly an identifier and an expression; this version does not support the Scheme shorthand \texttt{(define (f x) ...)}. A definition updates the current environment and evaluates to its assigned value.
+\section{Anonymous functions and calls}
+\begin{lstlisting}
+(define square (lambda (x) (* x x)))
+(square 6)
+\end{lstlisting}
+A \texttt{lambda} has one parameter list and exactly one body expression. Parameter lists may be empty; duplicate parameter names are rejected. A call evaluates its operator, then its arguments from left to right, then invokes the resulting callable. The number of arguments to a user-defined function must match the number of parameters exactly.
+\section{Conditional expressions}
+\begin{lstlisting}
+(if (= 2 2) 10 20)
+\end{lstlisting}
+\texttt{if} requires exactly three subexpressions: condition, then branch, and else branch. Only the chosen branch is evaluated. The implementation selects the else branch \emph{only} when the condition is Python \texttt{False}; all other values, including the integer \texttt{0}, count as true. This truth rule matches the idea that zero is not false, but no source-level Boolean literals are currently supplied.
+\section{Primitive functions}
+\begin{longtable}{p{0.14\textwidth}p{0.40\textwidth}p{0.37\textwidth}}\toprule Form & Meaning & Example / result\\\midrule\endhead
+\texttt{=} & Exactly two integer arguments; returns a Python Boolean internally. & \texttt{(= 3 3)} $\rightarrow$ \texttt{True}\\
+\texttt{-} & One or more integer arguments; unary negation or left operand minus the sum of remaining operands. & \texttt{(- 10 2 3)} $\rightarrow$ \texttt{5}\\
+\texttt{*} & Zero or more integer arguments; their product; empty product is one. & \texttt{(* 2 3 4)} $\rightarrow$ \texttt{24}\\\bottomrule
+\end{longtable}
+Both \texttt{-} and \texttt{*} enforce integer arguments through \texttt{expect\_integer}; \texttt{=} does likewise. Python \texttt{bool} values are explicitly excluded from integer operands even though \texttt{bool} subclasses \texttt{int} in Python. \texttt{(+ 2 3)} is \emph{not} implemented.
+\section{Several top-level expressions}
+\begin{lstlisting}
+(define a 8)
+(define b 3)
+(- a b)
+\end{lstlisting}
+This file returns \texttt{5}. Top-level forms execute in source order. An empty file is accepted, and \texttt{run} returns Python \texttt{None}; \texttt{main.py} therefore prints \texttt{None}.
+\section{Lexical closures}
+\begin{lstlisting}
+(define make-subtractor
+  (lambda (x)
+    (lambda (y) (- x y))))
+
+((make-subtractor 7) 2)
+\end{lstlisting}
+The result is \texttt{5}. The inner closure retains access to the environment where it was created, so \texttt{x} continues to refer to seven after the outer call has returned.
+\section{Examples of unsupported syntax}
+\begin{lstlisting}
+'hello                  ; quote shorthand is not supported
+(quote hello)           ; quote special form is not supported
+(+ 1 2)                 ; '+' primitive is absent
+(lambda (x) x x)        ; more than one body expression
+(define (f x) x)        ; function shorthand is absent
+\end{lstlisting}
+The first example may be parsed as a symbol and fail on lookup; others may parse successfully but fail during evaluation. Syntax acceptance does not imply semantic support.
+
+\chapter{Execution Model and Language Semantics}
+\section{Expression categories}
+The parser yields Python \texttt{int} values, \texttt{Symbol} values, and nested Python \texttt{list} values. The evaluator maps integers to themselves, resolves symbols through an environment, recognizes the three special forms, and otherwise treats a nonempty list as a function call. Empty list expressions are rejected during evaluation.
+\section{Evaluation order}
+\begin{enumerate}[leftmargin=*]
+\item A literal integer evaluates to itself.
+\item A symbol resolves to its nearest visible binding.
+\item \texttt{define}, \texttt{lambda}, and \texttt{if} receive dedicated evaluation rules.
+\item For an ordinary call, the operator expression is evaluated first.
+\item Each argument is evaluated in left-to-right source order.
+\item User-defined function calls create a local environment extending the closure's captured environment.
+\item The function body executes in that local environment and its value becomes the call result.
+\end{enumerate}
+\section{Function recursion}
+The factorial closure captures the global environment object when \texttt{lambda} is evaluated. The following \texttt{define} then installs the new closure in that \emph{same mutable environment}. Recursive calls find \texttt{factorial} there. No special recursive-function syntax or fixed-point combinator is required.
+\section{Factorial trace}
+\begin{align*}
+f(5)&=5\cdot f(4)\\
+&=5\cdot4\cdot f(3)\\
+&=5\cdot4\cdot3\cdot f(2)\\
+&=5\cdot4\cdot3\cdot2\cdot f(1)\\
+&=5\cdot4\cdot3\cdot2\cdot1\cdot f(0)\\
+&=120.
+\end{align*}
+The base case \texttt{(= n 0)} is evaluated before either branch; at zero, \texttt{if} returns the integer one without recursing further.
+\section{Simplified grammar}
+The following is an explanatory EBNF-like sketch, not an exact replacement for pyparsing's token-matching and comment-handling behavior.
+\begin{lstlisting}
+program    := expression*
+expression := integer | symbol | '(' expression* ')'
+integer    := ['+' | '-'] decimal_digit+
+symbol     := one_or_more_nonwhitespace_non_delimiter_chars
+comment    := ';' all_chars_until_newline
+\end{lstlisting}
+Syntactic correctness at this level is deliberately broader than meaningful executable forms. The evaluator enforces shapes for special forms and nonempty calls.
+
+\chapter{Command-Line and Python Interfaces}
+\section{Command-line interface}
+\begin{lstlisting}[language=bash]
+python main.py PATH_TO_SOURCE.lisp
+\end{lstlisting}
+\texttt{main.py} uses \texttt{argparse} and \texttt{pathlib.Path}, reads the input as UTF-8, parses all content, executes the resulting expressions, and prints the final result via Python \texttt{print}. There is no interactive mode and no other application-specific flags.
+\section{Parser API}
+\begin{lstlisting}[language=Python]
+from parser import parse, Symbol
+expressions = parse('(define n 5) (* n 2)')
+# [[Symbol('define'), Symbol('n'), 5],
+#  [Symbol('*'), Symbol('n'), 2]]
+\end{lstlisting}
+\texttt{parse(source: str)} processes the entire input, returns a list of top-level expressions, and raises a pyparsing parsing exception if the input is malformed. Text after a valid program is not silently accepted.
+\section{Runtime API}
+\begin{lstlisting}[language=Python]
+from parser import parse
+from runtime import run, standard_environment
+
+program = parse('(define n 5) (* n 2)')
+result = run(program)
+assert result == 10
+
+env = standard_environment()
+assert run(parse('(define x 7)'), env) == 7
+assert run(parse('(* x 6)'), env) == 42
+\end{lstlisting}
+\texttt{run(expressions, env=None)} constructs a fresh standard environment when \texttt{env} is omitted. Supplying a shared environment lets consecutive calls retain bindings. \texttt{evaluate(expr, env)} executes a single expression and is also public at the Python module level, although no stable API guarantee is declared.
+\section{Environment API}
+\begin{lstlisting}[language=Python]
+from runtime import Environment
+root = Environment({'x': 10})
+child = Environment({'y': 3}, parent=root)
+assert child.get('x') == 10
+assert child.get('y') == 3
+child.define('x', 8)  # shadows root binding
+\end{lstlisting}
+An unresolved name raises \texttt{LispError}. Keys typically are \texttt{Symbol} instances, which compare and hash like regular strings since \texttt{Symbol} derives from \texttt{str}.
+
+\chapter{Errors and Troubleshooting}
+\section{Error classes and reporting}
+\begin{longtable}{p{0.31\textwidth}p{0.61\textwidth}}\toprule Situation & Expected behavior\\\midrule\endhead
+Unmatched parenthesis & pyparsing parsing exception caught by CLI.\\
+Unknown name & \texttt{LispError: Undefined symbol: ...}.\\
+Malformed special form & \texttt{LispError} with a form-specific syntax hint.\\
+Wrong user-closure arity & \texttt{LispError} with expected and actual argument counts.\\
+Wrong arithmetic input type & \texttt{LispError: Expected integer, got ...}.\\
+Wrong \texttt{=} arity & \texttt{LispError} requiring exactly two arguments.\\
+Empty \texttt{(-)} & \texttt{LispError} requiring at least one argument.\\
+Missing file or invalid UTF-8 & \texttt{OSError} is caught for filesystem errors; Unicode decoding errors are \emph{not} caught by the current CLI handler.\\
+Deep or nonterminating recursion & Python \texttt{RecursionError} caught by the CLI.\\\bottomrule
+\end{longtable}
+\section{Common user mistakes}
+\subsection{Attempting to use addition}
+\begin{lstlisting}
+(+ 1 2)
+\end{lstlisting}
+This results in an undefined-symbol error because \texttt{+} has no standard-environment binding.
+\subsection{Calling a function before defining it}
+\begin{lstlisting}
+(factorial 5)
+(define factorial (lambda (n) ...))
+\end{lstlisting}
+The first form fails: top-level evaluation is sequential and the function has not been bound.
+\subsection{Passing a negative factorial input}
+\begin{lstlisting}
+(factorial -1)
+\end{lstlisting}
+The example definition handles zero but never reaches it when starting from a negative number and subtracting one repeatedly. The resulting recursion error is \emph{not} a proper domain validation response. The factorial function's domain should be restricted by a future implementation change, or the user should supply nonnegative integers only.
+\subsection{Assuming zero is false}
+\begin{lstlisting}
+(if 0 11 22)
+\end{lstlisting}
+The result is \texttt{11}: only the Python value \texttt{False} triggers the else branch.
+\section{Diagnostic limitations}
+There is no persistent source-location annotation in AST nodes, stack trace of Lisp calls, explicit evaluation-step budget, or purpose-built error reporting for all Python primitive exceptions. The CLI catches the listed exceptions but does not guarantee that every possible runtime failure becomes a clean Lisp diagnostic.
+
+\chapter{Validation and SKED Acceptance}
+\section{FACTORIAL-GATE contract}
+The baseline acceptance contract is successful file execution for nonnegative integer factorial inputs, correct basic arithmetic and scoping, predictable rejection of malformed input, and no evaluation of the unselected \texttt{if} branch. No negative-input domain protection is claimed.
+\begin{longtable}{p{0.33\textwidth}p{0.25\textwidth}p{0.32\textwidth}}\toprule Case & Input & Expected output / property\\\midrule\endhead
+Base case & \texttt{(factorial 0)} & \texttt{1}\\
+Small recursion & \texttt{(factorial 1)} & \texttt{1}\\
+Recursion & \texttt{(factorial 3)} & \texttt{6}\\
+Canonical example & \texttt{(factorial 5)} & \texttt{120}\\
+Larger example & \texttt{(factorial 10)} & \texttt{3628800}\\
+Lexical scoping & \texttt{((make 7) 2)} after defining \texttt{make} & \texttt{5}\\
+Conditional laziness & \texttt{(if (= 0 0) 1 unknown)} & \texttt{1}\\
+Undefined symbol & \texttt{(factorial x)} & \texttt{LispError}\\
+Malformed expression & \texttt{(factorial 5} & Parse error\\\bottomrule
+\end{longtable}
+\section{Test commands and reproducibility}
+\begin{lstlisting}[language=bash]
+python -m unittest discover -s tests -v
+python main.py examples/factorial.lisp
+\end{lstlisting}
+For reproducibility, record Python version, \texttt{pyparsing} version, operating system, test results and the source revision. The dependency currently permits a range of pyparsing versions; a fully locked requirements file is not yet included.
+\section{Acceptance versus future gates}
+\begin{itemize}[leftmargin=*]
+\item \textbf{FACTORIAL-GATE} tests the implemented minimal interpreter.
+\item \textbf{DOMAIN-GATE} (proposed) rejects negative inputs and invalid argument types with explicit domain errors.
+\item \textbf{ROBUSTNESS-GATE} (proposed) specifies limits, reliable diagnostics, parser edge cases, and exception containment.
+\item \textbf{LANGUAGE-EXTENSION-GATE} (proposed) introduces more forms and primitives without changing existing behavior unexpectedly.
+\end{itemize}
+
+\chapter{Implementation Nuances and Engineering Rationale}
+\label{ch:implementation}
+This chapter describes implementation details taken directly from \texttt{parser.py}, \texttt{runtime.py}, and \texttt{main.py}. Where an improvement is discussed, it is marked as \emph{proposed}, not as an implemented feature.
+\section{Why pyparsing is used}
+The front end delegates recursive syntax recognition and token grouping to \texttt{pyparsing}, avoiding a hand-written lexer and recursive-descent parser. The parser declares a \texttt{Forward} expression placeholder, makes a parenthesized group refer back to that expression, and sets the placeholder to the alternation of lists and atomic values. This supports arbitrary syntactic nesting, subject to Python and parser-library resource limits.
+\section{Parser construction}
+The essential implementation is:
+\begin{lstlisting}[language=Python]
+expr = Forward()
+integer = Regex(r"[+-]?\d+(?![^\s()])").set_parse_action(
+    lambda t: int(t[0]))
+symbol = Regex(r"[^\s();]+(?![^\s()])").set_parse_action(
+    lambda t: Symbol(t[0]))
+atom = integer | symbol
+sexpr = Group(Suppress("(") + ZeroOrMore(expr) + Suppress(")"))
+expr <<= (sexpr | atom)
+program = ZeroOrMore(expr)
+program.ignore(Regex(r";[^\n]*"))
+\end{lstlisting}
+The implementation does not include a separate token stream object or tokenizer class. \texttt{Suppress} discards parentheses, \texttt{Group} retains nested expression structure, and \texttt{parse\_string(..., parse\_all=True).as\_list()} converts the result to nested Python lists.
+\section{Token precedence and atom boundaries}
+The integer pattern is tried before the symbol pattern. Its final negative lookahead is intended to avoid accepting the number \texttt{123} as the prefix of \texttt{123abc}. The symbol pattern prohibits whitespace, parentheses, and semicolons. It is a pragmatic small-language grammar rather than a formal Scheme tokenization standard. Edge cases and any changes to the regular expressions should be protected by regression tests.
+\section{AST representation is deliberately lightweight}
+The syntax tree is a nested Python list rather than a hierarchy of AST classes. An integer atom is \texttt{int}; an identifier is \texttt{Symbol}, a \texttt{str} subclass; and a parenthesized expression is a \texttt{list}. This minimizes code, but gives up source spans, explicit node kinds, easy structural validation, and immutable syntax nodes. A future location-aware AST would require a conversion layer or revised parser actions.
+\section{The Symbol design and a subtle type property}
+Since \texttt{Symbol} inherits from \texttt{str}, \texttt{Symbol('x') == 'x'} is true. This allows the current runtime to key dictionaries and compare special-form names conveniently. The evaluator tests symbols using \texttt{isinstance(expr, Symbol)}, so arbitrary Python strings passed directly to \texttt{evaluate} are not valid Lisp identifiers. Avoid bypassing the parser unless constructing valid \texttt{Symbol} nodes explicitly.
+\section{Environment lookup and shadowing}
+\texttt{Environment} holds a mutable \texttt{bindings} dictionary and an optional \texttt{parent} link. Lookup searches the local dictionary first, then follows parents recursively; a local \texttt{define} writes only to the current dictionary. This is lexical scope, not dynamic scope, because closures retain their definition-site environment, not the caller's environment.
+\section{Closure value representation}
+\begin{lstlisting}[language=Python]
+@dataclass
+class Closure:
+    params: list
+    body: list
+    env: Environment
+\end{lstlisting}
+A closure stores formal parameter names, a single body AST, and the environment captured at lambda creation. Calling it creates a child environment containing formal-to-actual argument mappings. The Python evaluator recursively evaluates the stored body.
+\section{How self-recursion succeeds}
+\texttt{(define factorial (lambda ...))} evaluates \texttt{lambda} first, capturing the current global \texttt{Environment} object. It then installs \texttt{factorial} into that same object. Because the closure holds a reference, not a frozen copy, its body can look up its own name. Rebinding the name later changes what recursive lookup finds. This is a consequence of mutable lexical environments and should be documented when expanding the language.
+\section{Special forms versus normal functions}
+\texttt{define}, \texttt{lambda}, and \texttt{if} are selected by examining the unevaluated first element of a nonempty list. They cannot be implemented simply as strict ordinary functions here, because definitions need an unevaluated name, lambdas need an unevaluated body, and \texttt{if} must avoid evaluating both branches. Special-form dispatch has priority over environment lookup, so user bindings cannot override these syntactic names when they appear directly as list heads.
+\section{Subtle distinction between equality and truth}
+The equality primitive returns Python \texttt{True} or \texttt{False}. The evaluator accepts internal Booleans as literal values if called programmatically. But the parser has no Boolean literals, and the \texttt{if} check uses \texttt{condition is not False}. In particular, numeric zero is true; Python \texttt{None} would also be regarded as true if introduced through custom host bindings. A formal Boolean type would make the semantics less dependent on Python implementation details.
+\section{Built-in function invocation and exceptions}
+An ordinary call evaluates its operator to a value. If the value is a \texttt{Closure}, the interpreter checks arity and evaluates the body in a child scope. If it is any Python-callable object, it calls it directly. The host-call branch catches \texttt{TypeError} and wraps it as \texttt{LispError}; other host exceptions may escape. This is useful for prototyping, but it is not a restricted native-function interface. \emph{Proposed improvement}: maintain an explicit whitelist or primitive descriptor registry with arity, argument type contracts, and normalized exceptions.
+\section{Variadic primitive details}
+\texttt{multiply(*args)} multiplies all integer operands via \texttt{functools.reduce} with identity \texttt{1}, making \texttt{(*)} return one. \texttt{subtract(*args)} negates its single argument or subtracts the sum of all trailing arguments from the first. \texttt{equal(*args)} checks exactly two arguments and compares integers. These are subset-specific semantics and should not be extrapolated to full Scheme numeric behavior.
+\section{Interpreter recursion and stack consumption}
+Evaluation relies on recursive Python function calls, including nested calls to \texttt{evaluate} during user-function invocation. Consequently, factorial of a sufficiently large input may fail with \texttt{RecursionError}, even though Python supports arbitrarily large integers. There is no trampoline, continuation machine, tail-call elimination, or execution-step limit. \emph{Proposed improvement}: use an explicit evaluation loop or a small-step abstract machine for better control over recursion and quotas.
+\section{Memory management and reference cycles}
+No project-specific allocator or garbage collector is defined. Objects are created and managed by Python. Closures can capture environments that reference those closures through bindings, making cyclic object graphs possible. Python's cyclic garbage collector normally handles unreachable cycles, but the interpreter does not provide explicit memory ceilings, deterministic lifetime, or graph inspections.
+\section{Error boundaries and security considerations}
+The CLI catches \texttt{OSError}, \texttt{ParseBaseException}, \texttt{LispError}, and \texttt{RecursionError}. The parser rejects malformed trailing text through \texttt{parse\_all=True}. This does not make the interpreter a sandbox. An untrusted program can consume CPU and memory, and a host application can inject arbitrary Python callables into the environment. File access is provided by the command-line host, not by built-in Lisp functions. Do not execute untrusted inputs without external process isolation and resource limits.
+\section{Why \texttt{run} returns only the final value}
+\texttt{run} loops over each parsed top-level expression, replacing its \texttt{result} variable, and then returns the last result. This naturally supports \texttt{define} followed by an invocation and keeps the CLI trivial. It also means intermediate results are not displayed. A REPL would need its own read/print policy and possibly a persistent environment.
+\section{No dedicated source-location diagnostics}
+Because the parsed AST consists only of Python values and lists, source line and column positions are discarded before evaluation. Parse errors can reference source positions through pyparsing, but an undefined symbol deep in a function has no retained AST source location. \emph{Proposed improvement}: preserve spans in the parser output and include a Lisp call stack in runtime exceptions.
+\section{Host-language coupling}
+The current implementation deliberately uses Python integers, Booleans, lists, dicts, dataclasses, exceptions, callables, and garbage collection. This reduces code size and is excellent for initial SKED validation. It also means behavior such as recursion depth, error wording, Boolean printing (\texttt{True}/\texttt{False}), and integer representation remains coupled to Python rather than defined by an independent Lisp runtime.
+
+\chapter{Evolution Roadmap}
+\section{Minimal next iteration}
+Before adding broad language features, introduce negative-factorial domain protection, explicit integer and callable argument validation at public boundaries, source position reporting, and regression tests for empty lists and malformed atom boundaries. Distinguish language-defined errors from host exceptions. Keep \texttt{FACTORIAL-GATE} passing.
+\section{Intermediate language features}
+Possible extension order: addition and comparison primitives; Boolean constants; local binding via \texttt{let}; a multi-expression \texttt{begin}; first-class pairs and lists; quotation; basic predicates and formatted output. Each extension needs documented syntax, evaluation semantics, and independent acceptance tests.
+\section{Longer-term architecture}
+If the aim becomes a general interpreter rather than a compact experiment, consider a stable typed AST, token spans, environment abstraction, primitive registration layer, trampoline/explicit machine, deterministic test fixtures, memory and CPU resource ceilings, and integration into a continuous integration workflow.
+\section{Suggested SKED artifacts}
+\begin{longtable}{p{0.31\textwidth}p{0.60\textwidth}}\toprule Artifact & Content\\\midrule\endhead
+Language subset specification & Grammar, value types, special forms and primitive contracts.\\
+Architecture decision record & Justification for pyparsing, Python AST lists and recursive evaluator.\\
+Acceptance test specification & Gate IDs, positive and negative fixtures, expected diagnostics.\\
+Implementation inventory & Source files and function responsibilities, dependencies and version policy.\\
+Risk register & Nontermination, Python recursion limits, host callable leakage, resource exhaustion.\\
+Change log & Compatibility-sensitive syntax and semantic changes between versions.\\\bottomrule
+\end{longtable}
+
+\appendix
+\chapter{Complete Source Example}
+\begin{lstlisting}
+; examples/factorial.lisp
+(define factorial
+  (lambda (n)
+    (if (= n 0)
+        1
+        (* n (factorial (- n 1))))))
+
+(factorial 5)
+\end{lstlisting}
+\chapter{Quick Reference}
+\begin{longtable}{p{0.36\textwidth}p{0.55\textwidth}}\toprule Form & Behavior\\\midrule\endhead
+\texttt{123}, \texttt{-7} & Integer values.\\
+\texttt{name} & Look up a symbol.\\
+\texttt{(define name expr)} & Bind in current environment.\\
+\texttt{(lambda (x y) expr)} & Construct lexical closure.\\
+\texttt{(if test yes no)} & Evaluate condition and one branch.\\
+\texttt{(f arg1 arg2)} & Evaluate operator and arguments, then call.\\
+\texttt{(= a b)} & Integer equality.\\
+\texttt{(- x ...)} & Integer subtraction or negation.\\
+\texttt{(* x ...)} & Integer multiplication.\\
+\texttt{; comment} & Ignore through end of line.\\\bottomrule
+\end{longtable}
+\chapter{Document Basis}
+This manual was prepared against the actual files distributed in the \texttt{mini\_lisp\_sked} project archive on 13 October 2026. Operational descriptions refer to the observed code structure in \texttt{parser.py}, \texttt{runtime.py}, \texttt{main.py}, \texttt{tests/test\_factorial.py}, and the example source. Proposed features are not implied to exist in the supplied repository.
+\end{document}
